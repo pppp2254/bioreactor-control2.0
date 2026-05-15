@@ -20,9 +20,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
-# Ensure project root is on sys.path so `src.serial_detector` resolves correctly
-# regardless of whether this file is run as `python src/sensor_dashboard.py`
-# or `python -m src.sensor_dashboard`.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import serial.tools.list_ports
@@ -32,27 +29,26 @@ from src.serial_detector import probe_port, save_signature
 
 # ── Shared state ──────────────────────────────────────────────────────────────
 _lock = threading.Lock()
-_port_state: dict[str, dict] = {}   # device → info dict
+_port_state: dict[str, dict] = {}
 _executor = ThreadPoolExecutor(max_workers=4)
 
 
 def _make_entry(port, status: str) -> dict:
     return {
-        "device": port.device,
+        "device":      port.device,
         "description": port.description or "",
-        "vid": port.vid,
-        "pid": port.pid,
-        "status": status,
+        "vid":         port.vid,
+        "pid":         port.pid,
+        "status":      status,
         "sensor_type": None,
-        "baud": None,
-        "config": None,
-        "raw": None,
-        "updated": datetime.now().strftime("%H:%M:%S"),
+        "baud":        None,
+        "config":      None,
+        "raw":         None,
+        "updated":     datetime.now().strftime("%H:%M:%S"),
     }
 
 
 def _probe_and_update(device: str):
-    """Run in a worker thread: probe device, update shared state."""
     with _lock:
         info = _port_state.get(device, {})
     vid = info.get("vid")
@@ -65,23 +61,21 @@ def _probe_and_update(device: str):
             return
         if probe:
             _port_state[device].update({
-                "status": "connected",
+                "status":      "connected",
                 "sensor_type": probe.get("sensor_type"),
-                "baud": probe.get("baud"),
-                "config": probe.get("config"),
-                "raw": probe.get("raw"),
-                "updated": datetime.now().strftime("%H:%M:%S"),
+                "baud":        probe.get("baud"),
+                "config":      probe.get("config"),
+                "raw":         probe.get("raw"),
+                "updated":     datetime.now().strftime("%H:%M:%S"),
             })
         else:
             _port_state[device].update({
-                "status": "no response",
+                "status":  "no response",
                 "updated": datetime.now().strftime("%H:%M:%S"),
             })
 
 
 def _bg_monitor(poll: float = 3.0):
-    """Background thread: populate and keep _port_state current."""
-    # Seed with ports already connected at startup
     initial = list(serial.tools.list_ports.comports())
     with _lock:
         for p in initial:
@@ -97,10 +91,10 @@ def _bg_monitor(poll: float = 3.0):
             import time
             time.sleep(poll)
             current_ports = {p.device: p for p in serial.tools.list_ports.comports()}
-            current_set = set(current_ports.keys())
+            current_set   = set(current_ports.keys())
 
             removed = known - current_set
-            added = current_set - known
+            added   = current_set - known
 
             with _lock:
                 for dev in removed:
@@ -118,48 +112,64 @@ def _bg_monitor(poll: float = 3.0):
             print(f"[sensor_dashboard] bg monitor error: {exc}")
 
 
-# ── Colours ───────────────────────────────────────────────────────────────────
+# ── Design tokens ─────────────────────────────────────────────────────────────
+FONT    = "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif"
+BG      = "#f8fafc"
+SURFACE = "#ffffff"
+BORDER  = "#e2e8f0"
+TEXT    = "#0f172a"
+MUTED   = "#64748b"
+BLUE    = "#2563eb"
 
 SENSOR_COLORS = {
-    "pH":          "#4CAF50",
-    "DO":          "#2196F3",
-    "Temperature": "#FF9800",
-    "Foam":        "#9C27B0",
-    "Stirrer":     "#00BCD4",
-    "Flow":        "#F44336",
-    "UNKNOWN":     "#9E9E9E",
+    "pH":          "#16a34a",
+    "DO":          "#2563eb",
+    "Temperature": "#ea580c",
+    "Foam":        "#7c3aed",
+    "Stirrer":     "#0891b2",
+    "Flow":        "#dc2626",
+    "UNKNOWN":     "#94a3b8",
 }
 
 STATUS_COLORS = {
-    "connected":    "#4CAF50",
-    "disconnected": "#F44336",
-    "probing":      "#FF9800",
-    "no response":  "#757575",
+    "connected":    "#16a34a",
+    "disconnected": "#dc2626",
+    "probing":      "#d97706",
+    "no response":  "#94a3b8",
+}
+
+STATUS_BG = {
+    "connected":    "#f0fdf4",
+    "disconnected": "#fef2f2",
+    "probing":      "#fffbeb",
+    "no response":  "#f8fafc",
 }
 
 
 def _sensor_card(info: dict) -> html.Div:
     sensor  = info.get("sensor_type") or "UNKNOWN"
     status  = info.get("status", "unknown")
-    color   = SENSOR_COLORS.get(sensor, "#9E9E9E")
-    s_color = STATUS_COLORS.get(status, "#9E9E9E")
+    color   = SENSOR_COLORS.get(sensor, "#94a3b8")
+    s_color = STATUS_COLORS.get(status, "#94a3b8")
+    s_bg    = STATUS_BG.get(status, "#f8fafc")
     raw     = info.get("raw") or ""
-    preview = repr(raw[:100]) if raw else "—"
+    preview = repr(raw[:120]) if raw else None
     device  = info["device"]
 
     label_row = html.Div()
     if sensor == "UNKNOWN" and raw:
         label_row = html.Div(
-            style={"marginTop": "10px", "display": "flex", "gap": "8px"},
+            style={"marginTop": "12px", "display": "flex", "gap": "8px"},
             children=[
                 dcc.Input(
                     id={"type": "label-input", "device": device},
-                    placeholder="Type sensor name (pH, DO, Temperature…)",
+                    placeholder="Sensor name (pH, DO, Temperature...)",
                     debounce=False,
                     style={
-                        "padding": "4px 8px", "borderRadius": "4px",
-                        "border": "1px solid #555", "background": "#111",
-                        "color": "#fff", "width": "240px",
+                        "padding": "5px 10px", "borderRadius": "4px",
+                        "border": f"1px solid {BORDER}", "backgroundColor": BG,
+                        "color": TEXT, "fontFamily": FONT, "fontSize": "0.875rem",
+                        "width": "260px",
                     },
                 ),
                 html.Button(
@@ -167,8 +177,10 @@ def _sensor_card(info: dict) -> html.Div:
                     id={"type": "label-btn", "device": device},
                     n_clicks=0,
                     style={
-                        "background": color, "color": "#fff", "border": "none",
-                        "borderRadius": "4px", "padding": "5px 14px", "cursor": "pointer",
+                        "backgroundColor": BLUE, "color": "#fff", "border": "none",
+                        "borderRadius": "4px", "padding": "5px 14px",
+                        "cursor": "pointer", "fontFamily": FONT,
+                        "fontSize": "0.8rem", "fontWeight": "500",
                     },
                 ),
             ],
@@ -176,79 +188,128 @@ def _sensor_card(info: dict) -> html.Div:
 
     return html.Div(
         style={
-            "border": f"2px solid {color}", "borderRadius": "10px",
-            "padding": "16px", "marginBottom": "14px", "background": "#1e1e2e",
+            "backgroundColor": SURFACE,
+            "border": f"1px solid {BORDER}",
+            "borderLeft": f"4px solid {color}",
+            "borderRadius": "6px",
+            "padding": "16px 18px",
+            "marginBottom": "10px",
+            "boxShadow": "0 1px 3px rgba(0,0,0,0.06)",
         },
         children=[
             html.Div(
-                style={"display": "flex", "justifyContent": "space-between", "alignItems": "center"},
+                style={"display": "flex", "justifyContent": "space-between",
+                       "alignItems": "flex-start"},
                 children=[
                     html.Div([
                         html.Span(sensor, style={
-                            "fontSize": "20px", "fontWeight": "bold",
-                            "color": color, "marginRight": "12px",
+                            "fontSize": "1rem", "fontWeight": "600",
+                            "color": color, "marginRight": "10px",
+                            "fontFamily": FONT,
                         }),
-                        html.Span(device, style={"color": "#aaa", "fontSize": "13px"}),
+                        html.Span(device, style={
+                            "color": MUTED, "fontSize": "0.8rem",
+                            "fontFamily": FONT,
+                        }),
                     ]),
                     html.Span(status.upper(), style={
-                        "background": s_color, "color": "#fff",
-                        "padding": "3px 10px", "borderRadius": "12px",
-                        "fontSize": "11px", "fontWeight": "bold",
+                        "backgroundColor": s_bg, "color": s_color,
+                        "border": f"1px solid {s_color}",
+                        "padding": "2px 10px", "borderRadius": "12px",
+                        "fontSize": "0.7rem", "fontWeight": "600",
+                        "fontFamily": FONT, "letterSpacing": "0.04em",
+                        "whiteSpace": "nowrap",
                     }),
                 ],
             ),
+
             html.Div(info.get("description") or "",
-                     style={"color": "#888", "fontSize": "12px", "marginTop": "4px"}),
+                     style={"color": MUTED, "fontSize": "0.8rem",
+                            "fontFamily": FONT, "marginTop": "4px"}),
+
             html.Div(
                 style={"marginTop": "10px", "display": "flex", "gap": "24px"},
                 children=[
-                    html.Div([html.Span("Baud: ", style={"color": "#aaa"}),
-                              html.Span(str(info.get("baud") or "—"), style={"color": "#fff"})]),
-                    html.Div([html.Span("Config: ", style={"color": "#aaa"}),
-                              html.Span(info.get("config") or "—", style={"color": "#fff"})]),
-                    html.Div([html.Span("Updated: ", style={"color": "#aaa"}),
-                              html.Span(info.get("updated") or "—", style={"color": "#fff"})]),
+                    _kv("Baud",    str(info.get("baud") or "—")),
+                    _kv("Config",  info.get("config") or "—"),
+                    _kv("Updated", info.get("updated") or "—"),
                 ],
             ),
+
             html.Div(
                 style={"marginTop": "8px"},
                 children=[
-                    html.Span("Response: ", style={"color": "#aaa", "fontSize": "12px"}),
+                    html.Span("Response  ", style={
+                        "color": MUTED, "fontSize": "0.75rem",
+                        "fontFamily": FONT, "fontWeight": "600",
+                        "textTransform": "uppercase", "letterSpacing": "0.06em",
+                    }),
                     html.Code(preview, style={
-                        "background": "#111", "color": "#0f0",
-                        "padding": "2px 6px", "borderRadius": "4px",
-                        "fontSize": "11px", "wordBreak": "break-all",
+                        "backgroundColor": "#f1f5f9", "color": TEXT,
+                        "padding": "2px 8px", "borderRadius": "4px",
+                        "fontSize": "0.8rem", "fontFamily": "monospace",
+                        "wordBreak": "break-all",
                     }),
                 ],
-            ) if raw else html.Div(),
+            ) if preview else html.Div(),
+
             label_row,
         ],
     )
 
 
-# ── App layout ────────────────────────────────────────────────────────────────
+def _kv(label, value):
+    return html.Div([
+        html.Span(f"{label}  ", style={
+            "color": MUTED, "fontSize": "0.75rem", "fontFamily": FONT,
+            "fontWeight": "600", "textTransform": "uppercase",
+            "letterSpacing": "0.05em",
+        }),
+        html.Span(value, style={
+            "color": TEXT, "fontSize": "0.875rem", "fontFamily": FONT,
+        }),
+    ])
 
+
+# ── App layout ────────────────────────────────────────────────────────────────
 app = Dash(__name__, title="Sensor Detection")
+
 app.layout = html.Div(
-    style={"background": "#13131f", "minHeight": "100vh", "padding": "30px",
-           "fontFamily": "monospace", "color": "#fff"},
+    style={"backgroundColor": BG, "minHeight": "100vh",
+           "fontFamily": FONT, "color": TEXT},
     children=[
-        html.H2("RS-232 Sensor Detection", style={"marginBottom": "4px"}),
-        html.Div(id="subtitle", style={"color": "#888", "fontSize": "13px", "marginBottom": "24px"}),
-        dcc.Interval(id="tick", interval=3000, n_intervals=0),
-        html.Div(id="cards"),
-        html.Div(id="label-feedback",
-                 style={"color": "#4CAF50", "marginTop": "10px", "fontSize": "13px"}),
+        html.Div([
+            html.Div([
+                html.H1("RS-232 Sensor Detection",
+                        style={"margin": 0, "fontSize": "1.1rem",
+                               "fontWeight": "600", "color": TEXT,
+                               "fontFamily": FONT}),
+                html.Div(id="subtitle",
+                         style={"color": MUTED, "fontSize": "0.8rem",
+                                "fontFamily": FONT, "marginTop": "2px"}),
+            ]),
+        ], style={
+            "padding": "14px 28px", "backgroundColor": SURFACE,
+            "borderBottom": f"1px solid {BORDER}",
+            "boxShadow": "0 1px 3px rgba(0,0,0,0.06)",
+        }),
+
+        html.Div([
+            dcc.Interval(id="tick", interval=3000, n_intervals=0),
+            html.Div(id="cards"),
+            html.Div(id="label-feedback",
+                     style={"color": "#16a34a", "marginTop": "8px",
+                            "fontSize": "0.875rem", "fontFamily": FONT}),
+        ], style={"padding": "20px 28px", "maxWidth": "860px"}),
     ],
 )
 
 
 # ── Callbacks ─────────────────────────────────────────────────────────────────
-
 @app.callback(
-    Output("cards", "children"),
+    Output("cards",    "children"),
     Output("subtitle", "children"),
-    Input("tick", "n_intervals"),
+    Input("tick",      "n_intervals"),
 )
 def refresh(_n):
     with _lock:
@@ -258,15 +319,16 @@ def refresh(_n):
         return (
             html.Div(
                 "No serial ports detected. Plug in a sensor to begin.",
-                style={"color": "#888", "marginTop": "40px", "textAlign": "center"},
+                style={"color": MUTED, "marginTop": "40px",
+                       "textAlign": "center", "fontFamily": FONT},
             ),
-            f"Last scan: {datetime.now().strftime('%H:%M:%S')} — waiting for devices",
+            f"Last scan: {datetime.now().strftime('%H:%M:%S')}  —  waiting for devices",
         )
 
-    cards = [_sensor_card(info) for info in state.values()]
+    cards     = [_sensor_card(info) for info in state.values()]
     connected = sum(1 for v in state.values() if v.get("status") == "connected")
-    subtitle = (
-        f"Last scan: {datetime.now().strftime('%H:%M:%S')} — "
+    subtitle  = (
+        f"Last scan: {datetime.now().strftime('%H:%M:%S')}  —  "
         f"{len(state)} port(s) found, {connected} connected"
     )
     return cards, subtitle
@@ -274,7 +336,7 @@ def refresh(_n):
 
 @app.callback(
     Output("label-feedback", "children"),
-    Input({"type": "label-btn", "device": ALL}, "n_clicks"),
+    Input({"type": "label-btn",   "device": ALL}, "n_clicks"),
     State({"type": "label-input", "device": ALL}, "value"),
     prevent_initial_call=True,
 )
@@ -283,7 +345,6 @@ def save_label(n_clicks_list, label_values):
     if not ctx.triggered:
         return no_update
 
-    # Guard against spurious fires when a new card is rendered (n_clicks=0)
     triggered_n = ctx.triggered[0]["value"]
     if not triggered_n:
         return no_update
@@ -291,13 +352,13 @@ def save_label(n_clicks_list, label_values):
     prop_id = ctx.triggered[0]["prop_id"]
     try:
         id_dict = json.loads(prop_id.split(".")[0])
-        device = id_dict["device"]
+        device  = id_dict["device"]
     except Exception:
         return no_update
 
-    # Find the corresponding label value by matching device in the ALL state list
     states_list = ctx.states_list[0]
-    idx = next((i for i, s in enumerate(states_list) if s["id"]["device"] == device), None)
+    idx = next((i for i, s in enumerate(states_list)
+                if s["id"]["device"] == device), None)
     if idx is None:
         return no_update
 
@@ -308,20 +369,19 @@ def save_label(n_clicks_list, label_values):
     with _lock:
         info = copy.deepcopy(_port_state.get(device, {}))
 
-    # Auto-derive a specific pattern from the raw response so we don't save ".*"
-    raw_sample = info.get("raw") or ""
+    raw_sample  = info.get("raw") or ""
     default_pat = re.escape(raw_sample[:8].strip()) if raw_sample else ".*"
 
     entry = {
-        "device": device,
+        "device":      device,
         "description": info.get("description", ""),
-        "vid": info.get("vid"),
-        "pid": info.get("pid"),
-        "baud": info.get("baud"),
-        "config": info.get("config"),
-        "raw_sample": raw_sample[:200],
+        "vid":         info.get("vid"),
+        "pid":         info.get("pid"),
+        "baud":        info.get("baud"),
+        "config":      info.get("config"),
+        "raw_sample":  raw_sample[:200],
         "sensor_type": label_value,
-        "pattern": default_pat,
+        "pattern":     default_pat,
     }
     save_signature(entry)
 
@@ -329,11 +389,10 @@ def save_label(n_clicks_list, label_values):
         if device in _port_state:
             _port_state[device]["sensor_type"] = label_value
 
-    return f"Saved '{label_value}' for {device} (pattern: {default_pat})"
+    return f"Saved '{label_value}' for {device}  (pattern: {default_pat})"
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
-
 if __name__ == "__main__":
     t = threading.Thread(target=_bg_monitor, daemon=True)
     t.start()
