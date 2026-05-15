@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bioreactor Simulator</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Times New Roman",serif;background:#fff;color:#111}
+body.dark{background:#0f172a;color:#e2e8f0}
+body.dark header{border-bottom-color:#334155;background:#1e293b}
+body.dark .sidebar{background:#1e293b;border-right-color:#334155}
+body.dark .metric{border-color:#334155;background:#1e293b}
+body.dark .chart-box{background:#1e293b}
+body.dark .action-log{background:#1e293b;border-top-color:#334155;color:#94a3b8}
+body.dark select,body.dark button:not(.primary):not(.danger){background:#1e293b;color:#e2e8f0;border-color:#334155}
+header{padding:12px 24px;border-bottom:2px solid #111;display:flex;justify-content:space-between;align-items:center}
+header h1{font-size:1.2rem;font-weight:normal}
+header p{font-size:0.78rem;color:#666;margin-top:2px}
+.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+select,button{font-family:"Times New Roman",serif;font-size:0.85rem;padding:5px 10px;border:1px solid #111;background:#fff;cursor:pointer}
+button:hover{background:#f0f0f0}
+button.primary{background:#1a56db;color:#fff;border-color:#1a56db}
+button.primary:hover{background:#1344b0}
+button.danger{background:#dc2626;color:#fff;border-color:#dc2626}
+.upload-btn{font-family:"Times New Roman",serif;font-size:0.85rem;padding:5px 10px;border:1px solid #111;background:#fff;cursor:pointer;display:inline-block}
+.upload-btn:hover{background:#f0f0f0}
+.main{display:grid;grid-template-columns:240px 1fr;height:calc(100vh - 58px)}
+.sidebar{border-right:1px solid #ddd;padding:14px;overflow-y:auto;background:#fafafa}
+.sidebar h3{font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;color:#666;margin:12px 0 5px}
+.metric{border:1px solid #ddd;border-radius:4px;padding:7px 11px;margin-bottom:5px}
+.metric .label{font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:#666}
+.metric .value{font-size:1.2rem;color:#111;margin-top:1px}
+.metric .value.blue{color:#1a56db}
+.metric .value.green{color:#16a34a}
+.metric .value.orange{color:#ea580c}
+.phase-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.75rem;margin-top:2px}
+.phase-growth{background:#dcfce7;color:#166534}
+.phase-induction{background:#fef9c3;color:#854d0e}
+.phase-production{background:#dbeafe;color:#1e40af}
+.phase-harvest{background:#fee2e2;color:#991b1b}
+.layer-badge{font-size:0.7rem;padding:2px 6px;border-radius:8px}
+.layer-rules{background:#f3f4f6;color:#111}
+.layer-ml{background:#dbeafe;color:#1e40af}
+.layer-safety{background:#fee2e2;color:#991b1b}
+.alerts{font-size:0.75rem;color:#dc2626;margin-top:5px}
+.right-col{display:flex;flex-direction:column;overflow:hidden}
+.charts{display:grid;grid-template-rows:1fr 1fr;grid-template-columns:1fr 1fr;gap:1px;background:#ddd;flex:1;overflow:hidden}
+.chart-box{background:#fff;padding:10px;display:flex;flex-direction:column}
+.chart-box h4{font-size:0.65rem;text-transform:uppercase;letter-spacing:0.06em;color:#666;margin-bottom:4px;font-weight:normal}
+.chart-note{font-size:0.62rem;color:#aaa;margin-bottom:4px}
+.chart-wrap{position:relative;flex:1;min-height:0}
+.action-log{background:#fafafa;border-top:1px solid #ddd;padding:7px 18px;font-size:0.75rem;color:#444;white-space:nowrap;overflow:hidden;flex-shrink:0}
+.progress-bar{height:3px;background:#e5e7eb;margin:7px 0;border-radius:2px}
+.progress-fill{height:100%;background:#1a56db;border-radius:2px;transition:width 0.3s}
+input[type=range]{width:70px;vertical-align:middle}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Bioreactor Simulator</h1>
+    <p>HPV52 L1 · Hansenula polymorpha · Layered control simulation</p>
+  </div>
+  <div class="controls">
+    <select id="batchSelect"></select>
+    <label style="font-size:0.8rem;display:flex;gap:4px;align-items:center">
+      Speed
+      <input type="range" id="speedSlider" min="1" max="20" value="5"
+        oninput="document.getElementById('speedVal').textContent=this.value">
+      <span id="speedVal">5</span>x
+    </label>
+    <button class="primary" id="btnStart" onclick="startSim()">▶ Start</button>
+    <button class="danger" onclick="stopSim()">■ Stop</button>
+    <button onclick="resetSim()">↺ Reset</button>
+    <label class="upload-btn" title="Upload new batch xlsx">
+      + Upload
+      <input type="file" accept=".xlsx" onchange="uploadFile(event)" style="display:none">
+    </label>
+    <button onclick="toggleDark()">◑ Dark</button>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+    <h3>Status</h3>
+    <div class="metric">
+      <div class="label">Time</div>
+      <div class="value blue" id="mTime">— h</div>
+    </div>
+    <div class="metric">
+      <div class="label">Phase</div>
+      <div id="mPhase"><span class="phase-badge phase-growth">growth</span></div>
+    </div>
+    <div class="metric">
+      <div class="label">Decision Layer</div>
+      <div id="mLayer"><span class="layer-badge layer-rules">rules</span></div>
+    </div>
+    <h3>Sensors</h3>
+    <div class="metric"><div class="label">DO (%)</div><div class="value" id="mDO">—</div></div>
+    <div class="metric"><div class="label">pH</div><div class="value" id="mPH">—</div></div>
+    <div class="metric"><div class="label">Stirrer (rpm)</div><div class="value" id="mStir">—</div></div>
+    <div class="metric"><div class="label">OD660</div><div class="value" id="mOD">—</div></div>
+    <div class="metric"><div class="label">Glycerol (g/L)</div><div class="value" id="mGlyc">—</div></div>
+    <h3>Control Output</h3>
+    <div class="metric"><div class="label">Methanol Feed (%)</div><div class="value orange" id="mMeOH">0</div></div>
+    <div class="metric"><div class="label">L1 Predicted (mg/L)</div><div class="value green" id="mL1">—</div></div>
+    <div class="metric"><div class="label">ML Confidence</div><div class="value blue" id="mConf">—</div></div>
+    <h3>Alerts</h3>
+    <div class="alerts" id="alerts">None</div>
+    <div class="progress-bar" style="margin-top:12px">
+      <div class="progress-fill" id="progress" style="width:0%"></div>
+    </div>
+    <div style="font-size:0.68rem;color:#666;margin-top:3px" id="progressLabel">0 / 0 steps</div>
+  </div>
+
+  <div class="right-col">
+    <div class="charts">
+      <div class="chart-box">
+        <h4>Dissolved Oxygen &amp; Stirrer</h4>
+        <div class="chart-note" id="noteDO"></div>
+        <div class="chart-wrap"><canvas id="chartDO"></canvas></div>
+      </div>
+      <div class="chart-box">
+        <h4>pH &amp; Temperature</h4>
+        <div class="chart-note" id="notePH"></div>
+        <div class="chart-wrap"><canvas id="chartPH"></canvas></div>
+      </div>
+      <div class="chart-box">
+        <h4>Biomass — OD660 &amp; DCW (g/L)</h4>
+        <div class="chart-note" id="noteBio">Sparse manual samples</div>
+        <div class="chart-wrap"><canvas id="chartBio"></canvas></div>
+      </div>
+      <div class="chart-box">
+        <h4>L1 Yield — Predicted vs Actual (mg/L)</h4>
+        <div class="chart-note" id="noteL1">ML prediction vs manual samples</div>
+        <div class="chart-wrap"><canvas id="chartL1"></canvas></div>
+      </div>
+    </div>
+    <div class="action-log" id="actionLog">Ready — select a batch and press Start</div>
+  </div>
+</div>
+
+<script>
+Chart.defaults.font.family = "'Times New Roman', serif"
+Chart.defaults.font.size = 11
+
+const BLUE="#1a56db", BLACK="#111", GREEN="#16a34a", GRAY="#999"
+
+function makeChart(id, datasets) {
+  return new Chart(document.getElementById(id), {
+    type:"line", data:{labels:[], datasets},
+    options:{
+      animation:false, responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{labels:{font:{size:10},boxWidth:18}}},
+      scales:{
+        x:{title:{display:true,text:"Time (h)"},ticks:{maxTicksLimit:8,font:{size:10}},grid:{color:"#f0f0f0"}},
+        y:{ticks:{font:{size:10}},grid:{color:"#f0f0f0"}}
+      }
+    }
+  })
+}
+
+const charts = {
+  DO: makeChart("chartDO",[
+    {label:"DO (%)",data:[],borderColor:BLUE,borderWidth:1.5,pointRadius:0,tension:0.2},
+    {label:"Stirrer/10",data:[],borderColor:GRAY,borderWidth:1,pointRadius:0,tension:0.2,borderDash:[3,2]},
+  ]),
+  PH: makeChart("chartPH",[
+    {label:"pH",data:[],borderColor:BLACK,borderWidth:1.5,pointRadius:0,tension:0.2},
+    {label:"Temp (°C)",data:[],borderColor:GRAY,borderWidth:1,pointRadius:0,tension:0.2,borderDash:[3,2]},
+  ]),
+  Bio: makeChart("chartBio",[
+    {label:"OD660",data:[],borderColor:BLUE,borderWidth:1,pointRadius:5,tension:0.3,pointBackgroundColor:BLUE,spanGaps:false},
+    {label:"DCW (g/L)",data:[],borderColor:BLACK,borderWidth:1,pointRadius:4,tension:0.3,pointBackgroundColor:BLACK,borderDash:[3,2],spanGaps:false},
+  ]),
+  L1: makeChart("chartL1",[
+    {label:"Predicted",data:[],borderColor:BLUE,borderWidth:1.5,pointRadius:0,tension:0.3},
+    {label:"Actual",data:[],borderColor:BLACK,borderWidth:1,pointRadius:5,tension:0.3,pointBackgroundColor:BLACK,spanGaps:false},
+  ]),
+}
+
+function push(chart, time, values) {
+  chart.data.labels.push(parseFloat(time).toFixed(1))
+  values.forEach((v,i) => {
+    chart.data.datasets[i].data.push(
+      (v!==null&&v!=="null"&&v!==undefined&&!isNaN(parseFloat(v)))?parseFloat(v):null
+    )
+  })
+  chart.update("none")
+}
+
+function resetCharts() {
+  Object.values(charts).forEach(c => {
+    c.data.labels=[]
+    c.data.datasets.forEach(ds=>ds.data=[])
+    c.update()
+  })
+}
+
+// Dark mode
+function toggleDark() {
+  document.body.classList.toggle("dark")
+  const dark = document.body.classList.contains("dark")
+  Object.values(charts).forEach(c => {
+    c.options.scales.x.grid.color = dark?"#334155":"#f0f0f0"
+    c.options.scales.y.grid.color = dark?"#334155":"#f0f0f0"
+    c.options.plugins.legend.labels.color = dark?"#e2e8f0":"#111"
+    c.update()
+  })
+}
+
+// Load batches into dropdown
+async function loadBatches() {
+  try {
+    const data = await fetch("/api/available").then(r=>r.json())
+    const sel = document.getElementById("batchSelect")
+    sel.innerHTML = ""
+    for (const [key, info] of Object.entries(data)) {
+      const opt = document.createElement("option")
+      opt.value = key
+      const range = info.time_range
+      opt.textContent = key + " (0-" + range[1].toFixed(0) + "h)"
+      sel.appendChild(opt)
+    }
+  } catch(e) {
+    console.error("Failed to load batches:", e)
+  }
+}
+loadBatches()
+
+// Upload file
+async function uploadFile(event) {
+  const file = event.target.files[0]
+  if (!file) return
+  const formData = new FormData()
+  formData.append("file", file)
+  document.getElementById("actionLog").textContent = "Uploading " + file.name + "..."
+  try {
+    const res = await fetch("/api/upload", {method:"POST", body:formData}).then(r=>r.json())
+    if (res.error) {
+      document.getElementById("actionLog").textContent = "Upload failed: " + res.error
+    } else {
+      document.getElementById("actionLog").textContent =
+        "Loaded " + res.batch + ": " + res.continuous_rows + " continuous, " + res.sparse_rows + " sparse rows"
+      await loadBatches()
+    }
+  } catch(e) {
+    document.getElementById("actionLog").textContent = "Upload error: " + e
+  }
+  event.target.value = ""
+}
+
+// Sidebar update
+const PHASE_CLASS = {growth:"phase-growth",induction:"phase-induction",production:"phase-production",harvest:"phase-harvest"}
+
+function fmt(v, d=1) {
+  return (v!==null&&v!=="null"&&v!==undefined&&!isNaN(parseFloat(v)))?parseFloat(v).toFixed(d):"—"
+}
+
+function updateSidebar(time, reading, control) {
+  document.getElementById("mTime").textContent = fmt(time) + " h"
+  const phase = control.phase||"growth"
+  document.getElementById("mPhase").innerHTML =
+    '<span class="phase-badge ' + (PHASE_CLASS[phase]||"") + '">' + phase + "</span>"
+  const layer = control.layer_used||"rules"
+  document.getElementById("mLayer").innerHTML =
+    '<span class="layer-badge layer-' + layer + '">' + layer + "</span>"
+  document.getElementById("mDO").textContent   = fmt(reading.DO_pct)
+  document.getElementById("mPH").textContent   = fmt(reading.pH, 2)
+  document.getElementById("mStir").textContent = fmt(reading.stirrer, 0)
+  document.getElementById("mOD").textContent   = fmt(reading.OD660, 1)
+  document.getElementById("mGlyc").textContent = fmt(reading.glycerol_gL, 2)
+  document.getElementById("mMeOH").textContent = fmt(control.methanol_feed_pct)
+  document.getElementById("mL1").textContent   = fmt(control.L1_predicted, 0)
+  document.getElementById("mConf").textContent =
+    control.ml_confidence?(control.ml_confidence*100).toFixed(0)+"%":"—"
+  const alertEl = document.getElementById("alerts")
+  const hasAlert = control.alerts&&control.alerts.length>0
+  alertEl.textContent = hasAlert?control.alerts.join(" | "):"None"
+  alertEl.style.color = hasAlert?"#dc2626":"#666"
+  if (control.message&&control.action!=="none")
+    document.getElementById("actionLog").textContent =
+      "[" + fmt(time) + "h] " + control.message
+}
+
+// Simulation
+let ws=null, running=false, total=0, current=0
+
+async function startSim() {
+  if (running) return
+  resetCharts()
+  const batch = document.getElementById("batchSelect").value
+  const speed = parseInt(document.getElementById("speedSlider").value)
+  if (!batch) { alert("Select a batch first"); return }
+
+  ws = new WebSocket("ws://localhost:3000/ws/simulate")
+
+  ws.onopen = () => {
+    running = true
+    ws.send(JSON.stringify({batch, speed}))
+    document.getElementById("actionLog").textContent =
+      "Simulation started — " + batch + " x" + speed
+  }
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data)
+    if (msg.type === "meta") {
+      total = msg.total_sparse
+      const hasCont = msg.has_continuous
+      document.getElementById("noteDO").textContent =
+        hasCont ? "Continuous sensor data (valid window)" : "No continuous DO — sensor off"
+      document.getElementById("notePH").textContent =
+        hasCont ? "Continuous sensor data (valid window)" : "No continuous pH — sensor off"
+      return
+    }
+    if (msg.type === "step") {
+      current++
+      const {time_h, reading, control} = msg
+      updateSidebar(time_h, reading, control)
+      push(charts.DO,  time_h, [reading.DO_pct, reading.stirrer?reading.stirrer/10:null])
+      push(charts.PH,  time_h, [reading.pH, reading.temp_c])
+      push(charts.Bio, time_h, [reading.OD660, reading.DCW_gL])
+      push(charts.L1,  time_h, [control.L1_predicted, reading.L1_yield_mgL])
+      const pct = (current/total*100).toFixed(0)
+      document.getElementById("progress").style.width = pct + "%"
+      document.getElementById("progressLabel").textContent = current + " / " + total + " steps"
+    } else if (msg.type === "done") {
+      running = false
+      document.getElementById("actionLog").textContent = "Simulation complete — " + current + " steps"
+    }
+  }
+
+  ws.onerror = () => { running=false; document.getElementById("actionLog").textContent="Connection error" }
+  ws.onclose = () => { running=false }
+}
+
+function stopSim() {
+  if (ws) ws.close()
+  running = false
+  document.getElementById("actionLog").textContent = "Stopped"
+}
+
+async function resetSim() {
+  stopSim()
+  resetCharts()
+  const batch = document.getElementById("batchSelect").value
+  if (batch) await fetch("/api/reset/" + batch, {method:"POST"})
+  document.getElementById("mTime").textContent = "— h"
+  document.getElementById("progress").style.width = "0%"
+  document.getElementById("progressLabel").textContent = "0 / 0 steps"
+  document.getElementById("actionLog").textContent = "Reset — ready"
+  document.getElementById("noteDO").textContent = ""
+  document.getElementById("notePH").textContent = ""
+}
+</script>
+</body>
+</html>

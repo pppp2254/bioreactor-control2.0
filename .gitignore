@@ -1,0 +1,26 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Node / Bun
+node_modules/
+web/node_modules/
+web/bun.lock
+
+# Generated outputs (keep structure not files)
+outputs/models/*.pkl
+outputs/processed_data/*.csv
+outputs/processed_data/*.json
+outputs/figures/
+
+# Data files — ignore entire folder locally
+data/
+
+# OS
+.DS_Store

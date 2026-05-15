@@ -1,0 +1,48 @@
+version: "3.9"
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    ports:
+      - "3000:3000"
+    environment:
+      - PYTHON_API=http://api:8000
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  signal-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8050:8050"
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+    command: python src/dashboard.py
+    restart: unless-stopped
+
+  ai-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8051:8051"
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+    command: python src/ai_dashboard.py
+    restart: unless-stopped
